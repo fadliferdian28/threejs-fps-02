@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MERIDIAN RELAY — a 5v5 tactical FPS</title>
+<link rel="icon" href="./favicon.ico">
+<style>
+  :root {
+    --ink: #e9e6df; --muted: #98a0a8; --accent: #ffb347; --rust: #c75b2a;
+    --teal: #2fb8a8; --panel: rgba(12, 16, 26, 0.82); --hairline: rgba(233, 230, 223, 0.18);
+    --font-ui: system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-num: ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1a2038; color: var(--ink); font-family: var(--font-ui); }
+  #game-canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  #hud { position: fixed; inset: 0; pointer-events: none; user-select: none; }
+
+  /* Top centre: round, timer, score. */
+  #topbar { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); text-align: center; }
+  #round-label { font-size: 11px; letter-spacing: 0.25em; color: var(--muted); }
+  #timer { font-family: var(--font-num); font-size: 34px; font-weight: 700; line-height: 1.1; }
+  #timer.urgent { color: #ff6a4a; }
+  #scoreboard-mini { font-family: var(--font-num); font-size: 15px; margin-top: 2px; }
+  #score-crew { color: var(--teal); } #score-sab { color: #ff8a5c; }
+
+  /* Top left: minimap + rosters. */
+  #minimap-wrap { position: fixed; top: 14px; left: 14px; }
+  #minimap { width: 168px; height: 168px; border: 1px solid var(--hairline); border-radius: 4px; }
+  .roster { margin-top: 8px; font-size: 12px; background: var(--panel); border: 1px solid var(--hairline); border-radius: 4px; padding: 6px 8px; width: 168px; }
+  .roster-title { font-size: 10px; letter-spacing: 0.2em; color: var(--muted); margin-bottom: 4px; }
+  .roster-row { display: flex; justify-content: space-between; padding: 1px 0; }
+  .roster-row.dead { opacity: 0.4; text-decoration: line-through; }
+
+  /* Top right: kill feed + radio. */
+  #feed { position: fixed; top: 14px; right: 14px; text-align: right; font-size: 13px; width: 320px; }
+  .feed-row { padding: 2px 0; text-shadow: 0 1px 3px #000; }
+  .feed-row.kill { color: var(--ink); } .feed-row.bomb { color: var(--accent); font-weight: 600; }
+  .feed-row.buy { color: var(--muted); font-size: 12px; } .feed-row.round { color: var(--accent); font-weight: 700; }
+  #radio-feed { position: fixed; top: 150px; right: 14px; text-align: right; font-size: 12px; width: 320px; }
+  .radio-row { color: #9fd8ff; padding: 1px 0; text-shadow: 0 1px 3px #000; }
+
+  /* Bottom left: health, armour, money. */
+  #vitals { position: fixed; left: 24px; bottom: 22px; }
+  #health-num { font-family: var(--font-num); font-size: 44px; font-weight: 700; line-height: 1; }
+  #health-bar { width: 220px; height: 8px; background: rgba(255,255,255,0.15); border-radius: 4px; margin-top: 6px; overflow: hidden; }
+  #health-fill { height: 100%; width: 100%; background: var(--teal); transition: width 150ms linear; }
+  #health-fill.low { background: #ff6a4a; }
+  #armour-num { font-size: 13px; color: #9fd8ff; margin-top: 4px; min-height: 16px; }
+  #money { font-family: var(--font-num); font-size: 20px; color: var(--accent); margin-top: 2px; }
+
+  /* Bottom right: ammo + weapon. */
+  #weapon-block { position: fixed; right: 28px; bottom: 22px; text-align: right; }
+  #weapon-name { font-size: 14px; letter-spacing: 0.08em; color: var(--muted); }
+  #ammo { font-family: var(--font-num); font-size: 52px; font-weight: 700; line-height: 1; }
+  #ammo-reserve { font-size: 22px; color: var(--muted); }
+  #reload-label { color: var(--accent); font-size: 13px; font-weight: 700; min-height: 16px; letter-spacing: 0.15em; }
+  #grenade-label { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  /* Bottom centre: bomb status, hints, channel bar. */
+  #centre-bottom { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); text-align: center; width: 480px; }
+  #bomb-status { font-family: var(--font-num); font-size: 14px; font-weight: 700; letter-spacing: 0.1em; min-height: 18px; }
+  #bomb-status.danger { color: #ff6a4a; animation: blink 0.8s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0.4; } }
+  #carry-label { color: var(--accent); font-size: 13px; font-weight: 600; min-height: 16px; }
+  #hint { color: var(--muted); font-size: 12px; min-height: 16px; }
+  #channel { display: none; width: 260px; margin: 6px auto 0; }
+  #channel.show { display: block; }
+  #channel-bar { height: 8px; background: rgba(255,255,255,0.15); border-radius: 4px; overflow: hidden; }
+  #channel-fill { height: 100%; width: 0; background: var(--accent); }
+  #channel-label { font-size: 12px; letter-spacing: 0.15em; margin-top: 4px; }
+  #mute-label { position: fixed; bottom: 8px; right: 12px; font-size: 11px; color: var(--muted); }
+
+  /* Crosshair: four ticks whose gap widens with spread (--gap). */
+  #crosshair { --gap: 6px; position: fixed; left: 50%; top: 50%; width: 0; height: 0; }
+  #crosshair.hidden { display: none; }
+  #crosshair i { position: absolute; background: var(--ink); opacity: 0.9; box-shadow: 0 0 2px #000; }
+  #crosshair i:nth-child(1) { left: -1px; top: calc(-14px - var(--gap)); width: 2px; height: 9px; }
+  #crosshair i:nth-child(2) { left: -1px; top: calc(5px + var(--gap)); width: 2px; height: 9px; }
+  #crosshair i:nth-child(3) { top: -1px; left: calc(-14px - var(--gap)); height: 2px; width: 9px; }
+  #crosshair i:nth-child(4) { top: -1px; left: calc(5px + var(--gap)); height: 2px; width: 9px; }
+  #hitmarker { position: fixed; left: 50%; top: 50%; width: 26px; height: 26px; transform: translate(-50%, -50%) rotate(45deg); opacity: 0; }
+  #hitmarker.on { opacity: 1; }
+  #hitmarker i { position: absolute; background: var(--accent); }
+  #hitmarker.head i { background: #ff5a3c; }
+  #hitmarker i:nth-child(1) { left: 12px; top: 0; width: 2px; height: 8px; }
+  #hitmarker i:nth-child(2) { left: 12px; bottom: 0; width: 2px; height: 8px; }
+  #hitmarker i:nth-child(3) { top: 12px; left: 0; height: 2px; width: 8px; }
+  #hitmarker i:nth-child(4) { top: 12px; right: 0; height: 2px; width: 8px; }
+
+  /* Round banner. */
+  #banner { position: fixed; top: 24%; left: 50%; transform: translateX(-50%); text-align: center; opacity: 0; transition: opacity 250ms; }
+  #banner.show { opacity: 1; }
+  #banner-title { font-size: 44px; font-weight: 800; letter-spacing: 0.12em; text-shadow: 0 2px 12px #000; }
+  #banner-sub { font-size: 15px; color: var(--muted); margin-top: 4px; text-shadow: 0 1px 4px #000; }
+
+  /* Overlays: start, pause, end. */
+  .overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column; background: rgba(8, 10, 18, 0.62); pointer-events: auto; text-align: center; z-index: 20; }
+  .overlay.show { display: flex; }
+  .overlay h1 { font-size: 58px; letter-spacing: 0.18em; margin: 0; }
+  .overlay h2 { font-size: 15px; letter-spacing: 0.3em; color: var(--accent); margin: 6px 0 18px; font-weight: 600; }
+  .overlay p { max-width: 560px; color: var(--muted); font-size: 14px; line-height: 1.6; margin: 6px 0; }
+  .overlay .keys { font-family: var(--font-num); font-size: 12px; color: var(--ink); background: var(--panel); border: 1px solid var(--hairline); border-radius: 6px; padding: 10px 16px; margin: 14px 0; line-height: 1.9; }
+  button.big { font: 700 16px var(--font-ui); letter-spacing: 0.15em; color: #14161a; background: var(--accent); border: none; border-radius: 6px; padding: 13px 34px; cursor: pointer; margin-top: 16px; }
+  button.big:hover { filter: brightness(1.1); }
+  #scoreboard { width: 620px; margin-top: 16px; background: var(--panel); border: 1px solid var(--hairline); border-radius: 6px; padding: 10px 16px; text-align: left; }
+  .score-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr; padding: 4px 0; font-size: 13px; font-family: var(--font-num); }
+  .score-row.head { color: var(--muted); font-size: 11px; letter-spacing: 0.1em; border-bottom: 1px solid var(--hairline); margin-bottom: 4px; }
+  .score-row em { font-style: normal; color: var(--muted); font-size: 11px; }
+
+  /* Buy menu. */
+  #buymenu { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 480px; background: var(--panel); border: 1px solid var(--hairline); border-radius: 8px; padding: 18px 20px; display: none; pointer-events: auto; z-index: 15; }
+  #buymenu.open { display: block; }
+  #buymenu h3 { margin: 0 0 4px; letter-spacing: 0.15em; font-size: 16px; }
+  #buymenu-money { color: var(--accent); font-family: var(--font-num); margin-bottom: 10px; }
+  .buy-row { display: grid; grid-template-columns: 1.4fr 1.6fr 0.7fr; gap: 8px; padding: 8px 6px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  .buy-row:hover { background: rgba(255, 179, 71, 0.15); }
+  .buy-detail { color: var(--muted); font-size: 12px; }
+  .buy-price { text-align: right; font-family: var(--font-num); color: var(--accent); }
+
+  /* Full-screen effects. */
+  #scope-overlay { position: fixed; inset: 0; display: none; background: radial-gradient(circle at 50% 50%, transparent 26%, rgba(0,0,0,0.97) 27%); z-index: 10; }
+  #scope-overlay.show { display: block; }
+  #scope-overlay::before, #scope-overlay::after { content: ''; position: absolute; background: rgba(0,0,0,0.9); }
+  #scope-overlay::before { left: 50%; top: 0; width: 1px; height: 100%; }
+  #scope-overlay::after { top: 50%; left: 0; height: 1px; width: 100%; }
+  #flash-overlay { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 12; }
+  #damage-vignette { position: fixed; inset: 0; background: radial-gradient(ellipse at center, transparent 55%, rgba(200, 30, 20, 0.55) 100%); opacity: 0; pointer-events: none; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/three.module.min.js" } }
+</script>
+</head>
+<body>
+<canvas id="game-canvas"></canvas>
+<div id="hud">
+  <div id="topbar">
+    <div id="round-label">ROUND 1/15</div>
+    <div id="timer">--:--</div>
+    <div id="scoreboard-mini"><span id="score-crew">0</span> Relay Crew — Saboteurs <span id="score-sab">0</span></div>
+  </div>
+  <div id="minimap-wrap">
+    <canvas id="minimap" width="168" height="168"></canvas>
+    <div class="roster"><div class="roster-title" style="color:var(--teal)">RELAY CREW</div><div id="roster-crew"></div></div>
+    <div class="roster"><div class="roster-title" style="color:#ff8a5c">SABOTEURS</div><div id="roster-sab"></div></div>
+  </div>
+  <div id="feed"></div>
+  <div id="radio-feed"></div>
+  <div id="vitals">
+    <div><span id="health-num">100</span></div>
+    <div id="health-bar"><div id="health-fill"></div></div>
+    <div id="armour-num"></div>
+    <div id="money">$800</div>
+  </div>
+  <div id="weapon-block">
+    <div id="weapon-name">P9 Sidearm</div>
+    <div id="ammo"><span id="ammo-mag">12</span><span style="font-size:22px;color:var(--muted)"> / <span id="ammo-reserve">48</span></span></div>
+    <div id="reload-label"></div>
+    <div id="grenade-label">G: frag ×0</div>
+  </div>
+  <div id="centre-bottom">
+    <div id="bomb-status"></div>
+    <div id="carry-label"></div>
+    <div id="hint"></div>
+    <div id="channel"><div id="channel-bar"><div id="channel-fill"></div></div><div id="channel-label"></div></div>
+  </div>
+  <div id="crosshair"><i></i><i></i><i></i><i></i></div>
+  <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
+  <div id="banner"><div id="banner-title"></div><div id="banner-sub"></div></div>
+  <div id="mute-label">M: mute</div>
+  <div id="buymenu">
+    <h3>BUY MENU</h3>
+    <div id="buymenu-money"></div>
+    <div id="buymenu-rows"></div>
+    <p style="font-size:12px;color:var(--muted)">Press B or click outside to close. Gear is lost when you die.</p>
+  </div>
+  <div id="scope-overlay"></div>
+  <div id="flash-overlay"></div>
+  <div id="damage-vignette"></div>
+</div>
+
+<div id="overlay-start" class="overlay">
+  <h1>MERIDIAN RELAY</h1>
+  <h2>5V5 · PLANT &amp; DEFUSE · DECOMMISSIONED RELAY STATION AT DUSK</h2>
+  <p>The Saboteurs push up the ridge to plant a charge at the transmitter core or the antenna mast.
+  The Relay Crew holds the compound. First team to 8 rounds takes the match.</p>
+  <div class="keys">
+    WASD move · Mouse look · Click fire · R reload · 1–4 weapons · G grenade (5/6/7 select)<br>
+    E plant / defuse (hold) · B buy menu · Shift walk quietly · Ctrl crouch · Space jump · M mute
+  </div>
+  <button id="deploy-btn" class="big">DEPLOY</button>
+  <p>Click DEPLOY to lock the mouse and start Round 1.</p>
+</div>
+
+<div id="overlay-pause" class="overlay">
+  <h1>PAUSED</h1>
+  <h2>THE MATCH WAITS FOR YOU</h2>
+  <button id="resume-btn" class="big">RESUME</button>
+</div>
+
+<div id="overlay-end" class="overlay">
+  <h1 id="end-title">MATCH OVER</h1>
+  <h2 id="end-sub"></h2>
+  <div id="scoreboard"></div>
+  <button id="restart-btn" class="big">PLAY AGAIN</button>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
